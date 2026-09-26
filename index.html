@@ -59,6 +59,18 @@
         .markdown-body ul li::before { content: "•"; color: #60a5fa; position: absolute; left: 0.5em; font-weight: bold; }
         .markdown-body strong { font-weight: 700; color: #bfdbfe; background-color: rgba(59, 130, 246, 0.1); padding: 0 4px; border-radius: 4px; }
         
+        /* 新增：修復 Markdown 引言 (Blockquote) 話術在深色背景看不見的問題 */
+        .markdown-body blockquote {
+            border-left: 4px solid #3b82f6;
+            background-color: rgba(59, 130, 246, 0.05);
+            margin: 1em 0;
+            padding: 0.5em 1em;
+            color: #e2e8f0; /* 改為淺灰色 (slate-200) 確保清晰可見 */
+            border-radius: 0 8px 8px 0;
+            font-style: normal;
+        }
+        .markdown-body code { color: #93c5fd; background-color: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+        
         .btn-active:active { transform: scale(0.97); }
         .custom-checkbox input:checked + div { background-color: #3b82f6; border-color: #3b82f6; }
         .custom-checkbox input:checked + div svg { display: block; }
