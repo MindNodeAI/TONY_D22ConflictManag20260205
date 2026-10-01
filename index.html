@@ -59,13 +59,13 @@
         .markdown-body ul li::before { content: "•"; color: #60a5fa; position: absolute; left: 0.5em; font-weight: bold; }
         .markdown-body strong { font-weight: 700; color: #bfdbfe; background-color: rgba(59, 130, 246, 0.1); padding: 0 4px; border-radius: 4px; }
         
-        /* 新增：修復 Markdown 引言 (Blockquote) 話術在深色背景看不見的問題 */
+        /* 修正 Markdown 引言 (Blockquote) 話術在深色背景看不見的問題 */
         .markdown-body blockquote {
             border-left: 4px solid #3b82f6;
             background-color: rgba(59, 130, 246, 0.05);
             margin: 1em 0;
             padding: 0.5em 1em;
-            color: #e2e8f0; /* 改為淺灰色 (slate-200) 確保清晰可見 */
+            color: #e2e8f0; 
             border-radius: 0 8px 8px 0;
             font-style: normal;
         }
@@ -79,6 +79,7 @@
 </head>
 <body class="text-slate-800 flex flex-col min-h-screen">
 
+    <!-- Auth Container -->
     <div id="authContainer" class="fixed inset-0 z-[100] flex items-center justify-center auth-bg p-4 overflow-y-auto">
         <div class="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl p-8 w-full max-w-md relative overflow-hidden transition-all duration-300">
             <!-- Logo & Title -->
@@ -159,6 +160,7 @@
         </div>
     </div>
 
+    <!-- Main App Container -->
     <div id="appContainer" class="hidden flex-col min-h-screen">
         <nav class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 shadow-md">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -331,6 +333,7 @@
                     </div>
                 </div>
 
+                <!-- Mobile Profile Sidebar -->
                 <div class="lg:hidden flex flex-col gap-6 mt-8">
                     <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                         <div class="flex justify-between items-center mb-3"><h4 class="font-bold text-slate-700 text-sm flex items-center gap-2"><i class="fa-solid fa-cloud"></i> 雲端歷史紀錄</h4><span id="mobileCloudStatus" class="text-[10px] text-slate-400 bg-slate-100 px-2 py-1 rounded-full"><i class="fa-solid fa-spinner fa-spin"></i></span></div>
@@ -346,9 +349,15 @@
                 </div>
             </main>
         </div>
-        <footer class="bg-slate-900 text-slate-400 py-6 mt-auto"><div class="max-w-7xl mx-auto px-4 text-center"><p class="text-sm">© 2026 TONY STUDIO. 本教材由 TONY STUDIO 楊文澤顧問設計. All Rights Reserved.</p></div></footer>
+        <!-- Updated Copyright Footer -->
+        <footer class="bg-slate-900 text-slate-400 py-6 mt-auto">
+            <div class="max-w-7xl mx-auto px-4 text-center">
+                <p class="text-sm">@2020 TonyStudio (TONY 楊文澤顧問). All Rights Reserved.</p>
+            </div>
+        </footer>
     </div>
 
+    <!-- Admin Panel -->
     <div id="adminContainer" class="hidden min-h-screen bg-slate-100 flex flex-col">
         <nav class="bg-indigo-900 border-b border-indigo-800 sticky top-0 z-50 shadow-md">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8"><div class="flex justify-between h-16 items-center"><div class="flex items-center gap-3"><i class="fa-solid fa-shield-halved text-indigo-400 text-2xl"></i><span class="font-bold text-xl text-white tracking-wide">系統管理後台</span></div><button onclick="toggleAdminDashboard()" class="text-indigo-200 hover:text-white text-sm flex items-center gap-2 bg-indigo-800 hover:bg-indigo-700 px-4 py-2 rounded-lg transition-colors"><i class="fa-solid fa-arrow-right-to-bracket"></i> 返回前台</button></div></div>
@@ -575,19 +584,45 @@
 
         function setLoading(l) { const o = document.getElementById('loadingOverlay'); l ? o.classList.remove('hidden') : o.classList.add('hidden'); }
 
-        // 【新增】企業級 API 呼叫核心 (指數輪詢、錯誤過濾、備援切換)
+        /**
+         * 【任務二：企業級 Self-Healing JSON 解析管線】
+         * 自動排除 AI 誤生成的 Markdown 代碼塊 (```json ... ```) 
+         * 並運用正則提取有效結構，避免 Parse 失敗。
+         */
+        function parseSelfHealingJSON(text) {
+            if (typeof text !== 'string') return text;
+            try {
+                return JSON.parse(text); // 優先嘗試標準解析
+            } catch (error) {
+                console.warn("[Self-Healing JSON] 標準解析失敗，啟動容錯修復程序...");
+                try {
+                    // 1. 去除常見的 Markdown 代碼塊標記
+                    let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+                    // 2. 透過正則匹配第一組大括號或中括號的內容
+                    const match = cleanText.match(/(\{|\[)[\s\S]*(\}|\])/);
+                    if (match && match[0]) {
+                        return JSON.parse(match[0]);
+                    }
+                    throw new Error("正則提取後仍無法解析");
+                } catch (fallbackError) {
+                    console.error("[Self-Healing JSON] 最終修復失敗:", text, fallbackError);
+                    window.showToast("AI 回傳資料格式異常，容錯機制已攔截。", "error");
+                    throw new Error("JSON Parsing Error");
+                }
+            }
+        }
+
+        // 【企業級 API 呼叫核心】(指數輪詢、錯誤過濾、備援切換)
         async function geminiApiRequest(payload) {
             if (!apiKey) throw new Error('API Key Error');
             const urlTemplate = `https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key=${apiKey}`;
             const maxRetries = 3;
-            let baseDelay = 2000; // 基礎延遲 2 秒
+            let baseDelay = 2000;
 
-            // 內建的 fetch 執行器與錯誤解析
             const _executeFetch = async (modelUrl) => {
                 const res = await fetch(modelUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 const data = await res.json().catch(() => ({}));
                 
-                // 檢查 HTTP 狀態碼 (防呆排除非 429 錯誤)
                 if (!res.ok) {
                     const code = res.status;
                     const msg = data?.error?.message || `HTTP Error ${code}`;
@@ -596,7 +631,6 @@
                     throw new Error(`連線錯誤 (${code}): ${msg}`);
                 }
                 
-                // 檢查 Google API 特有的 Payload 內層錯誤
                 if (data.error) {
                     const code = data.error.code;
                     const msg = data.error.message;
@@ -605,41 +639,35 @@
                     throw new Error(msg);
                 }
                 
-                return data; // 成功回傳資料
+                return data;
             };
 
-            // 1. 嘗試主模型 (gemini-3.8-flash) 並包含指數輪詢機制
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
                     return await _executeFetch(urlTemplate.replace('{MODEL}', 'gemini-3.8-flash'));
                 } catch (error) {
-                    // 只針對 429 (Too Many Requests) 啟動重試
                     if (error.is429) {
                         if (attempt < maxRetries) {
-                            const delay = baseDelay * Math.pow(2, attempt); // 延遲秒數：2s, 4s, 8s
+                            const delay = baseDelay * Math.pow(2, attempt);
                             console.warn(`[429 頻率限制] 伺服器忙碌中，正在進行第 ${attempt + 1} 次重試 (等待 ${delay/1000} 秒)...`);
                             window.showToast(`伺服器忙碌中，正在進行第 ${attempt + 1} 次重試...`, 'info');
-                            
                             await new Promise(resolve => setTimeout(resolve, delay));
-                            continue; // 繼續下一次迴圈嘗試
+                            continue;
                         } else {
-                            break; // 已達最高上限 (3次)，跳出迴圈準備執行備援
+                            break; 
                         }
                     } else {
-                        throw error; // 遇到 400/401/403 等參數錯誤，立即拋出並中斷
+                        throw error;
                     }
                 }
             }
 
-            // 2. 雙模型備援機制 (Graceful Fallback)
             console.warn(`[Fallback] 系統滿載，已切換至備援模型 (gemini-3.5-flash) 執行。`);
             window.showToast(`系統滿載，已切換至備援模型執行`, 'info');
             
             try {
-                // 降級使用 3.5 版本進行最後一次嘗試
                 return await _executeFetch(urlTemplate.replace('{MODEL}', 'gemini-3.5-flash'));
             } catch (fallbackError) {
-                // 如果連備援模型都 429 爆炸，則拋出最終阻斷訊息
                 throw fallbackError.is429 ? new Error(`系統極度壅塞，請稍後再試 (${fallbackError.message})`) : fallbackError;
             }
         }
@@ -647,11 +675,11 @@
         async function callGemini(prompt, schema = null) {
             if (!apiKey) { toggleKeyModal(); throw new Error('API Key Error'); }
             
-            // 【升級】強化高階顧問的角色設定 (System Instruction)
             const sysPrompt = `你是一位具備 20 年經驗的高階企業顧問、衝突管理專家與商業談判教練。
 你的分析風格：犀利、直指核心、具備高度同理心與戰略高度。
 你的任務：洞察表象衝突背後的深層矛盾（如：恐懼、面子、權力不對等、核心利益），並提供具備實操性、能引導雙贏的解方。
-語言要求：一律使用台灣繁體中文 (zh-TW)，用語需極度專業並符合台灣商務與管理語境。`;
+語言要求：一律使用台灣繁體中文 (zh-TW)，用語需極度專業並符合台灣商務與管理語境。
+【強制輸出指令】若系統要求結構化輸出，請絕對不要包含 Markdown 代碼塊標記 (如 \`\`\`json)，請直接輸出純粹的 JSON 字串。`;
 
             const payload = { contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: sysPrompt }] }, generationConfig: { temperature: 0.6 } };
             if (schema) { payload.generationConfig.responseMimeType = "application/json"; payload.generationConfig.responseSchema = schema; }
@@ -659,9 +687,9 @@
             try {
                 const data = await geminiApiRequest(payload);
                 const txt = data.candidates[0].content.parts[0].text; 
-                return schema ? JSON.parse(txt) : txt;
+                return schema ? parseSelfHealingJSON(txt) : txt;
             } catch (e) { 
-                window.showToast(`AI 連線失敗: ${e.message}`, 'error'); 
+                window.showToast(`AI 處理中斷: ${e.message}`, 'error'); 
                 throw e; 
             }
         }
@@ -672,7 +700,6 @@
                  contents: hist.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.text }] })), 
                  systemInstruction: { parts: [{ text: sys }] } 
              };
-             
              try {
                  const data = await geminiApiRequest(payload);
                  return data.candidates[0].content.parts[0].text;
@@ -688,7 +715,7 @@
             if (cat === 'random') cat = cats[Math.floor(Math.random() * cats.length)];
             document.getElementById('categoryLabel').innerHTML = `<i class="fa-solid fa-tag"></i> 抽選主題：${cat}`; document.getElementById('categoryLabel').classList.remove('hidden');
             try {
-                const text = await callGemini(`生成「${cat}」情境。要求：1.人事時地物。2.兩方以上利益衝突。3.若是霸凌/性平請點出權力不對等。字數150字內。`, null);
+                const text = await callGemini(`請幫我生成一個「${cat}」的情境。要求：1.明確指出人事時地物。2.兩方以上的利益或認知衝突。3.若是霸凌或性平議題請點出權力不對等。字數控制在150字內，不要廢話。`, null);
                 document.getElementById('scenarioInput').value = text; await analyzeScenario(text, cat);
             } catch (e) { setLoading(false); }
         }
@@ -699,32 +726,42 @@
         async function analyzeScenario(text, cat) {
             try {
                 document.getElementById('roleplayArea').classList.add('hidden'); document.getElementById('btn-start-roleplay').classList.remove('hidden'); document.getElementById('btn-eval-roleplay').classList.add('hidden'); document.getElementById('roleplayEvalContainer').classList.add('hidden'); document.getElementById('roleplayInputArea').classList.remove('hidden'); document.getElementById('chatHistory').innerHTML = ''; document.getElementById('actionPlanContainer').classList.add('hidden'); document.getElementById('btn-generate-draft').classList.remove('hidden'); document.getElementById('draftContainer').classList.add('hidden');
+                
                 const schema = { type: "OBJECT", properties: { background: { type: "STRING" }, stakeholders: { type: "ARRAY", items: { type: "OBJECT", properties: { role: { type: "STRING" }, fact: { type: "STRING" }, viewpoint: { type: "STRING" }, stance: { type: "STRING" }, belief: { type: "STRING" } }, required: ["role", "fact", "viewpoint", "stance", "belief"] } }, solution: { type: "STRING" } }, required: ["background", "stakeholders", "solution"] };
                 
-                // 【升級】強化 FVSB 分析的深度要求
+                /**
+                 * 【任務一：極致 Prompt 優化 - Few-Shot 與邊界限制】
+                 */
                 const expertPrompt = `請以高階顧問的視角，深度分析以下情境，並進行利害關係人的 FVSB 拆解：
 
 情境描述：
 ${text}
 
-分析要求：
-1. 【情境輪廓 (background)】：用 2-3 句話精煉指出衝突的核心本質（如：資源分配、權力鬥爭、認知落差）與潛在風險。
-2. 【FVSB 拆解 (stakeholders)】：針對主要利害關係人（最多3位），精準拆解：
-   - Fact (事實)：無可爭議的客觀現狀（避免混入主觀情緒）。
-   - Viewpoint (觀點)：該角色對事實的主觀詮釋、感受與盲點。
-   - Stance (立場)：該角色表面上堅持的要求、態度或防衛機制。
-   - Belief (信仰/底層邏輯)：驅動其立場的深層價值觀、恐懼、面子問題或核心利益（請務必挖得夠深）。
-3. 【顧問解方 (solution)】：提供具備戰略高度的建議方案，排版請使用 Markdown，必須包含：
-   - **破冰切入點** (如何安全地開啟對話)
-   - **溝通策略與談判籌碼** (應對框架與具體的話術建議)
-   - **預期雙贏結果或停損點**
+【強制格式與 Few-Shot 範例】
+必須輸出為純 JSON 物件，絕對不可包含 Markdown \`\`\`json 標記！格式應如下：
+{
+  "background": "核心本質（如：資源分配、認知落差）與潛在風險 (2-3句話精煉指出)",
+  "stakeholders": [
+    {
+      "role": "業務主管老陳",
+      "fact": "公司本月業績未達標，且行銷預算被砍30%。",
+      "viewpoint": "認為行銷部支援不足，導致前線無子彈可打。",
+      "stance": "要求恢復預算，否則拒絕承諾下月KPI。",
+      "belief": "恐懼失去內部話語權，面子掛不住需要找替罪羊。"
+    }
+  ],
+  "solution": "### 顧問建議\\n\\n**破冰切入點**\\n（策略說明）...\\n\\n**溝通策略與談判籌碼**\\n（話術與籌碼）...\\n\\n**預期雙贏結果或停損點**\\n（預期成果）..."
+}
 
-請確保分析具備極高的專業度與實戰指導價值。`;
+分析要求：
+1. 針對主要利害關係人（最多3位），精準拆解 FVSB。
+2. Belief (信仰) 必須挖出深層價值觀、恐懼、面子問題或核心利益。
+3. solution 欄位支援 Markdown 語法，請提供實操性強的戰略建議。`;
 
                 const res = await callGemini(expertPrompt, schema);
                 currentResult = { id: Date.now().toString(), timestamp: new Date().toISOString(), mode: currentMode, category: cat, input: text, output: res };
                 displayResult(res); saveToHistory(currentResult);
-            } catch (e) { window.showToast(`分析失敗`, 'error'); } finally { setLoading(false); }
+            } catch (e) { console.error(e); window.showToast(`分析過程發生錯誤`, 'error'); } finally { setLoading(false); }
         }
 
         function displayResult(d, isMod = false) {
@@ -735,7 +772,7 @@ ${text}
                 h += `<div class="bg-blue-50/70 rounded-xl border border-blue-100 p-5 shadow-sm mb-6"><h3 class="font-bold text-blue-800 mb-2 flex items-center text-lg"><i class="fa-solid fa-map-location-dot mr-2 bg-blue-100 p-1.5 rounded-lg text-sm"></i>情境輪廓</h3><p class="text-slate-700 text-sm leading-relaxed">${d.background||""}</p></div>`;
                 h += `<div class="grid grid-cols-1 lg:grid-cols-${Math.min(d.stakeholders.length, 3)} gap-6 mb-6">`;
                 const thm = [ { h: 'bg-indigo-600', b: 'border-indigo-100', i: 'text-indigo-600 bg-indigo-100' }, { h: 'bg-emerald-600', b: 'border-emerald-100', i: 'text-emerald-600 bg-emerald-100' }, { h: 'bg-amber-600', b: 'border-amber-100', i: 'text-amber-600 bg-amber-100' } ];
-                d.stakeholders.forEach((s, i) => { const t = thm[i%3]; h += `<div class="bg-white rounded-xl shadow-sm border ${t.b} overflow-hidden flex flex-col"><div class="${t.h} px-4 py-3 border-b border-white/20"><h4 class="font-bold text-white text-base flex items-center"><i class="fa-solid fa-user-tag mr-2 opacity-80"></i>${s.role}</h4></div><div class="p-5 space-y-4 flex-grow text-sm"><div><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-check-double mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>事實</span><p class="text-slate-600 ml-6 leading-relaxed">${s.fact}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-glasses mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>觀點</span><p class="text-slate-600 ml-6 leading-relaxed">${s.viewpoint}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-flag mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>立場</span><p class="text-slate-600 ml-6 leading-relaxed">${s.belief}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-heart mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>信仰</span><p class="text-slate-600 ml-6 leading-relaxed">${s.belief}</p></div></div></div>`; });
+                d.stakeholders.forEach((s, i) => { const t = thm[i%3]; h += `<div class="bg-white rounded-xl shadow-sm border ${t.b} overflow-hidden flex flex-col"><div class="${t.h} px-4 py-3 border-b border-white/20"><h4 class="font-bold text-white text-base flex items-center"><i class="fa-solid fa-user-tag mr-2 opacity-80"></i>${s.role}</h4></div><div class="p-5 space-y-4 flex-grow text-sm"><div><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-check-double mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>事實</span><p class="text-slate-600 ml-6 leading-relaxed">${s.fact}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-glasses mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>觀點</span><p class="text-slate-600 ml-6 leading-relaxed">${s.viewpoint}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-flag mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>立場</span><p class="text-slate-600 ml-6 leading-relaxed">${s.stance}</p></div><div class="border-t border-slate-100 pt-3"><span class="font-bold text-slate-800 flex items-center mb-1"><i class="fa-solid fa-heart mr-1.5 ${t.i} p-1 rounded-md text-[10px]"></i>信仰</span><p class="text-slate-600 ml-6 leading-relaxed">${s.belief}</p></div></div></div>`; });
                 h += `</div>`;
             }
             if(!isMod) { document.getElementById('fvsb-dynamic-container').innerHTML = h; document.getElementById('res-solution').innerHTML = marked.parse(typeof d.solution==='string'?d.solution.replace(/\\n/g,'\n'):d.solution); a.scrollIntoView({ behavior: 'smooth' }); } 
@@ -745,23 +782,26 @@ ${text}
         async function generateActionPlan() {
             if (!currentResult) return; const b = document.querySelector('button[onclick="generateActionPlan()"]'); const o = b.innerHTML; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...'; b.disabled = true;
             try {
-                const acts = await callGemini(`基於建議：${currentResult.output.solution}，產生3-5個行動清單`, { type: "ARRAY", items: { type: "STRING" } });
+                const actsPrompt = `基於以下顧問建議，產生3-5個具體行動清單。
+建議內容：${currentResult.output.solution}
+【強制格式要求】請直接回傳 JSON 陣列，絕對不可加上 \`\`\`json 標記！範例：["行動一", "行動二"]`;
+                const acts = await callGemini(actsPrompt, { type: "ARRAY", items: { type: "STRING" } });
                 const l = document.getElementById('actionPlanList'); l.innerHTML = '';
                 (Array.isArray(acts)?acts:Object.values(acts)).forEach(a => { const i = document.createElement('div'); i.className = "flex items-start gap-3 p-2 hover:bg-slate-800/50 rounded-lg transition-colors cursor-pointer custom-checkbox"; i.innerHTML = `<input type="checkbox" class="hidden"><div class="flex-shrink-0 mt-0.5 w-4 h-4 rounded border border-slate-600 bg-slate-700 flex items-center justify-center"><svg class="w-3 h-3 text-white hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg></div><span class="leading-relaxed select-none">${a}</span>`; i.addEventListener('click', function(){const cb=this.querySelector('input'); cb.checked = !cb.checked;}); l.appendChild(i); });
                 document.getElementById('actionPlanContainer').classList.remove('hidden');
-            } catch (e) { window.showToast('清單失敗', 'error'); } finally { b.innerHTML = o; b.disabled = false; }
+            } catch (e) { window.showToast('清單生成失敗', 'error'); } finally { b.innerHTML = o; b.disabled = false; }
         }
 
         async function generateCommunicationDraft() {
             if (!currentResult) return; const b = document.getElementById('btn-generate-draft'); const o = b.innerHTML; b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 草擬中...'; b.disabled = true;
-            try { const d = await callGemini(`基於情境與建議，寫一段準備發送給對立方的文字訊息。`, null); document.getElementById('draftContent').textContent = d; document.getElementById('draftContainer').classList.remove('hidden'); } catch (e) { window.showToast('失敗', 'error'); } finally { b.innerHTML = o; b.disabled = false; }
+            try { const d = await callGemini(`基於情境與顧問建議，寫一段準備發送給對立方的文字訊息。語氣需不卑不亢、具備建設性。`, null); document.getElementById('draftContent').textContent = d; document.getElementById('draftContainer').classList.remove('hidden'); } catch (e) { window.showToast('草擬失敗', 'error'); } finally { b.innerHTML = o; b.disabled = false; }
         }
         function copyDraft() { navigator.clipboard.writeText(document.getElementById('draftContent').textContent).then(() => window.showToast("已複製", "success")); }
 
         async function startRoleplay() {
             if (!currentResult) return; document.getElementById('btn-start-roleplay').classList.add('hidden'); document.getElementById('btn-eval-roleplay').classList.remove('hidden'); document.getElementById('roleplayArea').classList.remove('hidden'); document.getElementById('roleplayEvalContainer').classList.add('hidden'); document.getElementById('roleplayInputArea').classList.remove('hidden'); document.getElementById('chatHistory').innerHTML = ''; roleplayHistory = [];
             let opp = "對立方"; if (currentResult.output.stakeholders && currentResult.output.stakeholders.length > 1) opp = currentResult.output.stakeholders[1].role;
-            const sys = `扮演『${opp}』，依據情境：「${currentResult.input}」對話。第一句就入戲，回覆簡短。`; addChatBubble('ai', 'typing...');
+            const sys = `扮演『${opp}』，依據情境：「${currentResult.input}」進行對話。規則：第一句就完全入戲，絕不說「好的」、「沒問題」，回覆需簡短且維持該角色的原始防衛立場。`; addChatBubble('ai', 'typing...');
             try { const m = await callGeminiChat([{role:'user',text:'(開始對話)'}], sys); removeTypingIndicator(); addChatBubble('ai', m); roleplayHistory.push({role:'ai',text:m}); roleplayHistory.sys = sys; } catch (e) { removeTypingIndicator(); }
         }
         function handleRoleplayEnter(e) { if(e.key === 'Enter') sendRoleplayMessage(); }
@@ -772,28 +812,52 @@ ${text}
         }
         function addChatBubble(r, t) { const d = document.createElement('div'); d.className = `chat-bubble ${r === 'user' ? 'chat-user' : 'chat-ai'} fade-in`; if (t === 'typing...') { d.id = 'typingIndicator'; d.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>'; } else d.innerText = t; const c = document.getElementById('chatHistory'); c.appendChild(d); c.scrollTop = c.scrollHeight; }
         function removeTypingIndicator() { const e = document.getElementById('typingIndicator'); if (e) e.remove(); }
+        
         async function evaluateRoleplay() {
             if(roleplayHistory.length < 2) return; const b = document.getElementById('btn-eval-roleplay'); b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; b.disabled = true;
             try {
                 const tr = roleplayHistory.map(m => `${m.role}: ${m.text}`).join('\n');
                 const schema = { type: "OBJECT", properties: { score: { type: "NUMBER" }, feedback: { type: "STRING" }, strengths: { type: "ARRAY", items: { type: "STRING" } }, improvements: { type: "ARRAY", items: { type: "STRING" } } }, required: ["score", "feedback", "strengths", "improvements"] };
-                const e = await callGemini(`你是教練。評分對話：\n${tr}`, schema);
+                
+                const evalPrompt = `你是高階溝通教練。請對以下模擬對話進行評分與覆盤：
+【對話紀錄】
+${tr}
+【強制格式與範例】請務必以純 JSON 格式回傳，絕對不可加上 \`\`\`json 標記！
+{
+  "score": 85,
+  "feedback": "綜合講評...",
+  "strengths": ["優點1", "優點2"],
+  "improvements": ["改進點1", "改進點2"]
+}`;
+                const e = await callGemini(evalPrompt, schema);
                 document.getElementById('evalScore').innerText = e.score; document.getElementById('evalFeedback').innerText = e.feedback; document.getElementById('evalStrengths').innerHTML = e.strengths.map(s => `<li>${s}</li>`).join(''); document.getElementById('evalImprovements').innerHTML = e.improvements.map(i => `<li>${i}</li>`).join('');
                 document.getElementById('roleplayInputArea').classList.add('hidden'); document.getElementById('roleplayEvalContainer').classList.remove('hidden'); b.classList.add('hidden'); document.getElementById('btn-start-roleplay').classList.remove('hidden'); document.getElementById('btn-start-roleplay').innerText = "重新演練"; document.getElementById('roleplayEvalContainer').scrollIntoView({behavior:'smooth'});
-            } catch (e) { window.showToast("評分失敗", "error"); } finally { b.innerHTML = '<i class="fa-solid fa-clipboard-check mr-1"></i> 結束並看評分'; b.disabled = false; }
+            } catch (e) { window.showToast("評分過程發生錯誤", "error"); } finally { b.innerHTML = '<i class="fa-solid fa-clipboard-check mr-1"></i> 結束並看評分'; b.disabled = false; }
         }
 
-        window.setupFirestoreListener = function() { if(!window.currentUser) return; if(window.historyUnsubscribe) window.historyUnsubscribe(); window.historyUnsubscribe = window.onSnapshot(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory')), (s) => { let r = []; s.forEach(d => r.push(d.data())); r.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)); appSavedRecords = r; renderHistory(); }, (error) => { console.warn("已安全關閉連線 (Snapshot Listener):", error.message); }); }
-        async function saveToHistory(r) { if(window.currentUser) try { await window.setDoc(window.doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory', r.id), r); window.showToast("已儲存", "success"); } catch(e){} }
-        async function deleteHistoryItem(id) { if(window.currentUser) try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory', id)); window.showToast("已刪除", "success"); } catch(e){} }
+        window.setupFirestoreListener = function() { 
+            if(!window.currentUser) return; 
+            if(window.historyUnsubscribe) window.historyUnsubscribe(); 
+            window.historyUnsubscribe = window.onSnapshot(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory')), (s) => { 
+                let r = []; s.forEach(d => r.push(d.data())); r.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)); appSavedRecords = r; renderHistory(); 
+            }, (error) => { console.warn("已安全關閉連線 (Snapshot Listener):", error.message); }); 
+        }
+        async function saveToHistory(r) { if(window.currentUser) try { await window.setDoc(window.doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory', r.id), r); window.showToast("已自動儲存", "success"); } catch(e){} }
+        async function deleteHistoryItem(id) { if(window.currentUser) try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'fvsbHistory', id)); window.showToast("已刪除紀錄", "success"); } catch(e){} }
         
         function setupHistoryListListener() {
+            // 防呆與防止記憶體洩漏：使用 Delegation 並確保只有在 DOMContentLoaded 時綁定一次
+            const historyClickHandler = (e) => {
+                const db = e.target.closest('.delete-btn'); if (db) { e.stopPropagation(); showConfirm('確定刪除此筆歷史紀錄？', () => deleteHistoryItem(db.dataset.id)); return; }
+                const hi = e.target.closest('.history-item'); if (hi) { const r = appSavedRecords.find(x => x.id === hi.dataset.id); if (r) { loadHistoryItem(r); window.scrollTo({top:0,behavior:'smooth'}); } }
+            };
+            
             ['historyListContainer', 'mobileHistoryListContainer'].forEach(id => {
-                const el = document.getElementById(id); if(!el) return;
-                el.addEventListener('click', (e) => {
-                    const db = e.target.closest('.delete-btn'); if (db) { e.stopPropagation(); showConfirm('確定刪除紀錄？', () => deleteHistoryItem(db.dataset.id)); return; }
-                    const hi = e.target.closest('.history-item'); if (hi) { const r = appSavedRecords.find(x => x.id === hi.dataset.id); if (r) { loadHistoryItem(r); window.scrollTo({top:0,behavior:'smooth'}); } }
-                });
+                const el = document.getElementById(id); 
+                if(el) {
+                    el.removeEventListener('click', historyClickHandler); // 清除可能殘留的 Listener
+                    el.addEventListener('click', historyClickHandler);
+                }
             });
             const hs = (e) => { historySearchQuery = e.target.value.trim().toLowerCase(); ['historySearch','mobileHistorySearch'].forEach(i => { if(document.getElementById(i)) document.getElementById(i).value = e.target.value; }); renderHistory(); };
             document.getElementById('historySearch')?.addEventListener('input', hs); document.getElementById('mobileHistorySearch')?.addEventListener('input', hs);
@@ -803,7 +867,7 @@ ${text}
             ['historyListContainer', 'mobileHistoryListContainer'].forEach(id => {
                 const el = document.getElementById(id); if(!el) return;
                 const f = appSavedRecords.filter(i => !historySearchQuery || i.input.toLowerCase().includes(historySearchQuery) || (i.category && i.category.toLowerCase().includes(historySearchQuery)));
-                if(f.length===0) { el.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">無紀錄</p>'; return; }
+                if(f.length===0) { el.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">無相關紀錄</p>'; return; }
                 el.innerHTML = f.map(i => `<div class="group relative p-3 rounded-lg hover:bg-slate-50 border border-slate-100 transition cursor-pointer history-item shadow-sm mb-2 bg-white" data-id="${i.id}"><div class="flex justify-between items-start mb-2 pr-6"><span class="text-[10px] font-bold flex items-center whitespace-nowrap overflow-hidden">${i.mode==='practice'?'<span class="text-blue-500 bg-blue-50 px-1 py-0.5 rounded">練習</span>':'<span class="text-green-500 bg-green-50 px-1 py-0.5 rounded">分析</span>'}${i.category?`<span class="text-[9px] text-slate-500 bg-slate-100 px-1 py-0.5 rounded ml-1 truncate max-w-[80px]">${i.category}</span>`:''}</span><span class="text-[10px] text-slate-400 whitespace-nowrap">${new Date(i.timestamp).toLocaleDateString('zh-TW', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span></div><p class="text-xs text-slate-600 line-clamp-2 pr-2">${i.input}</p><button class="absolute top-2 right-2 text-slate-300 hover:text-red-500 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity p-1 rounded delete-btn" data-id="${i.id}"><i class="fa-solid fa-trash-can text-sm"></i></button></div>`).join('');
             });
         }
@@ -815,34 +879,34 @@ ${text}
             if (a.classList.contains('hidden')) { a.classList.remove('hidden'); a.classList.add('flex'); d.classList.add('hidden'); } else { a.classList.add('hidden'); a.classList.remove('flex'); d.classList.remove('hidden'); fetchAdminUsers(); }
         }
         async function fetchAdminUsers() {
-            const tb = document.getElementById('adminUsersTableBody'); tb.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i></td></tr>';
+            const tb = document.getElementById('adminUsersTableBody'); tb.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> 資料載入中...</td></tr>';
             try {
                 const s = await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'users'))); allAdminUsersData = []; s.forEach(d => allAdminUsersData.push(d.data())); allAdminUsersData.sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
-                if(allAdminUsersData.length===0){tb.innerHTML='<tr><td colspan="6" class="p-8 text-center">無</td></tr>';return;}
+                if(allAdminUsersData.length===0){tb.innerHTML='<tr><td colspan="6" class="p-8 text-center text-slate-500">尚無會員資料</td></tr>';return;}
                 tb.innerHTML = allAdminUsersData.map(u => {
                     const isSup = (u.email === 'mindnodeai@gmail.com'); const bd = u.role === 'admin' ? `<span class="bg-amber-100 text-amber-700 text-[10px] px-2 py-1 rounded-full font-bold">Admin</span>` : `<span class="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded-full">User</span>`;
                     let ac = `<button onclick="adminViewUserHistory('${u.uid}', '${u.realName}')" class="text-blue-500 hover:bg-blue-50 p-1.5 rounded" title="查看"><i class="fa-solid fa-eye"></i></button>`;
                     if(!isSup) ac += `<button onclick="adminToggleRole('${u.uid}', '${u.role === 'admin' ? 'user' : 'admin'}')" class="text-indigo-500 hover:bg-indigo-50 p-1.5 rounded" title="更改權限"><i class="fa-solid ${u.role === 'admin' ? 'fa-arrow-down' : 'fa-arrow-up'}"></i></button><button onclick="showConfirm('確認刪除會員？', () => adminDeleteUser('${u.uid}'))" class="text-red-500 hover:bg-red-50 p-1.5 rounded" title="刪除"><i class="fa-solid fa-trash-can"></i></button>`;
                     return `<tr class="hover:bg-slate-50 border-b border-slate-100 text-sm"><td class="p-4 font-medium text-slate-800">${u.realName}</td><td class="p-4 text-slate-600 text-xs">${u.email}</td><td class="p-4 text-slate-600 text-xs">${u.identity}</td><td class="p-4 text-center">${bd}</td><td class="p-4 text-center text-slate-500">${u.loginCount||0}</td><td class="p-4 text-right">${ac}</td></tr>`;
                 }).join('');
-            } catch(e) { tb.innerHTML='<tr><td colspan="6" class="p-8 text-center text-red-400">失敗</td></tr>'; }
+            } catch(e) { tb.innerHTML='<tr><td colspan="6" class="p-8 text-center text-red-400">載入失敗</td></tr>'; }
         }
         async function adminToggleRole(u, r) { setGlobalLoading(true); try{ await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'users', u), {role:r}); await fetchAdminUsers(); }catch(e){}finally{setGlobalLoading(false);} }
-        async function adminDeleteUser(uid) { setGlobalLoading(true); try { const s = await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', uid, 'fvsbHistory'))); await Promise.all(s.docs.map(d => window.deleteDoc(d.ref))); await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'users', uid)); await fetchAdminUsers(); window.showToast("已刪除", "success"); } catch(e){} finally{setGlobalLoading(false);} }
-        async function adminViewUserHistory(uid, name) { document.getElementById('adminHistoryModalTitle').innerText = `${name} 紀錄`; const c = document.getElementById('adminHistoryModalContent'); c.innerHTML = '<div class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-slate-400"></i></div>'; document.getElementById('adminHistoryModal').classList.remove('hidden'); try{ const s = await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', uid, 'fvsbHistory'))); let r=[]; s.forEach(d=>r.push(d.data())); if(r.length===0){c.innerHTML='<div class="text-center py-10">無</div>';return;} r.sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)); c.innerHTML=r.map(x=>`<div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200 mb-4"><div class="flex justify-between items-center mb-3"><span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-bold">${x.mode==='practice'?'練習':'分析'} ${x.category?'• '+x.category:''}</span></div><p class="text-sm mb-3">${x.input}</p><button onclick='displayResult(${JSON.stringify(x.output).replace(/'/g, "&apos;")}, true)' class="text-xs text-blue-600 border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded">查看</button></div>`).join(''); }catch(e){} }
+        async function adminDeleteUser(uid) { setGlobalLoading(true); try { const s = await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', uid, 'fvsbHistory'))); await Promise.all(s.docs.map(d => window.deleteDoc(d.ref))); await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'users', uid)); await fetchAdminUsers(); window.showToast("已刪除會員", "success"); } catch(e){} finally{setGlobalLoading(false);} }
+        async function adminViewUserHistory(uid, name) { document.getElementById('adminHistoryModalTitle').innerText = `${name} 紀錄`; const c = document.getElementById('adminHistoryModalContent'); c.innerHTML = '<div class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-slate-400"></i> 讀取中...</div>'; document.getElementById('adminHistoryModal').classList.remove('hidden'); try{ const s = await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', uid, 'fvsbHistory'))); let r=[]; s.forEach(d=>r.push(d.data())); if(r.length===0){c.innerHTML='<div class="text-center py-10 text-slate-500">無紀錄</div>';return;} r.sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)); c.innerHTML=r.map(x=>`<div class="bg-white p-5 rounded-lg shadow-sm border border-slate-200 mb-4"><div class="flex justify-between items-center mb-3"><span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full font-bold">${x.mode==='practice'?'練習':'分析'} ${x.category?'• '+x.category:''}</span></div><p class="text-sm mb-3">${x.input}</p><button onclick='displayResult(${JSON.stringify(x.output).replace(/'/g, "&apos;")}, true)' class="text-xs text-blue-600 border border-blue-200 hover:bg-blue-50 px-3 py-1.5 rounded">查看詳細</button></div>`).join(''); }catch(e){c.innerHTML='<div class="text-center py-10 text-red-500">讀取錯誤</div>'} }
         function closeAdminHistoryModal() { document.getElementById('adminHistoryModal').classList.add('hidden'); }
         function exportUsersCSV() { if(allAdminUsersData.length===0)return; let c="\uFEFF姓名,信箱,身分,權限,次數,時間\n"+allAdminUsersData.map(u=>`"${u.realName}","${u.email}","${u.identity}","${u.role}","${u.loginCount||0}","${new Date(u.createdAt).toLocaleString('zh-TW')}"`).join('\n'); saveAs(new Blob([c],{type:'text/csv;charset=utf-8;'}),`會員名單_${new Date().toISOString().slice(0,10)}.csv`); }
         async function generateAdminAIReport() {
-            const st = document.getElementById('reportStartDate').value, ed = document.getElementById('reportEndDate').value; if(!st||!ed) return; setGlobalLoading(true, "AI分析中...");
+            const st = document.getElementById('reportStartDate').value, ed = document.getElementById('reportEndDate').value; if(!st||!ed) return; setGlobalLoading(true, "AI 深層趨勢分析中...");
             try {
                 const uids = (await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'users')))).docs.map(d=>d.data().uid); let ins=[];
                 for(const u of uids) { (await window.getDocs(window.query(window.collection(window.db, 'artifacts', window.appId, 'users', u, 'fvsbHistory')))).forEach(h=>{ const r=h.data(), d=new Date(r.timestamp); if(d>=new Date(st)&&d<=new Date(ed+"T23:59:59")) ins.push(`【${r.category||'無'}】${r.input}`); }); }
                 if(ins.length===0) { window.showToast("區間無資料", "error"); setGlobalLoading(false); return; }
-                const md = await callGemini(`你是高階顧問。寫「組織衝突管理趨勢報告」(1.摘要 2.熱區 3.盲點 4.建議)。紀錄:\n${ins.slice(0,30).join('\n---\n')}`, null);
+                const md = await callGemini(`你是高階顧問。寫「組織衝突管理趨勢報告」(包含: 1.摘要 2.熱區分析 3.組織盲點 4.管理建議)。原始紀錄:\n${ins.slice(0,30).join('\n---\n')}`, null);
                 const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, convertInchesToTwip } = docx;
                 let ch = [new Paragraph({text:"組織衝突趨勢報告",heading:HeadingLevel.HEADING_1,alignment:AlignmentType.CENTER,spacing:{after:300}}),new Paragraph({children:[new TextRun({text:`期間: ${st} 至 ${ed}`,font:"微軟正黑體"})],alignment:AlignmentType.RIGHT,spacing:{after:400}}),...parseMarkdownToDocx(md)];
                 const d = new Document({styles:{default:{document:{run:{font:"微軟正黑體",size:24}}}},sections:[{properties:{page:{margin:{top:convertInchesToTwip(1),right:convertInchesToTwip(1),bottom:convertInchesToTwip(1),left:convertInchesToTwip(1)}}},children:ch}]});
-                Packer.toBlob(d).then(b => saveAs(b, `衝突趨勢_${new Date().toISOString().slice(0,10)}.docx`)); window.showToast("下載成功", "success");
+                Packer.toBlob(d).then(b => saveAs(b, `衝突趨勢_${new Date().toISOString().slice(0,10)}.docx`)); window.showToast("報表下載成功", "success");
             } catch(e){} finally{setGlobalLoading(false);}
         }
 
@@ -856,7 +920,11 @@ ${text}
                 const bRow = (l,k,bg) => [ new TableRow({children:o.stakeholders.map(()=>new TableCell({children:[new Paragraph({children:[new TextRun({text:l,bold:true,font:"微軟正黑體"})]})],shading:{fill:bg},margins:{top:60,bottom:60,left:100,right:100}}))}), new TableRow({children:o.stakeholders.map(s=>new TableCell({children:[new Paragraph({children:[new TextRun({text:s[k],font:"微軟正黑體"})],spacing:{line:300}})],margins:{top:100,bottom:100,left:100,right:100}}))}) ];
                 ch.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},borders:{top:{style:BorderStyle.SINGLE,size:1,color:"CBD5E1"},bottom:{style:BorderStyle.SINGLE,size:1,color:"CBD5E1"},left:{style:BorderStyle.SINGLE,size:1,color:"CBD5E1"},right:{style:BorderStyle.SINGLE,size:1,color:"CBD5E1"},insideHorizontal:{style:BorderStyle.SINGLE,size:1,color:"E2E8F0"},insideVertical:{style:BorderStyle.SINGLE,size:1,color:"E2E8F0"}},rows:[new TableRow({children:hc}),...bRow("事實","fact","EEF2FF"),...bRow("觀點","viewpoint","F8FAFC"),...bRow("立場","stance","EEF2FF"),...bRow("信仰","belief","F8FAFC")]}));
             }
-            ch.push(new Paragraph({text:"",spacing:{after:200}})); ch.push(new Paragraph({text:"解方與建議:",heading:HeadingLevel.HEADING_2,spacing:{before:400,after:200}})); ch.push(...parseMarkdownToDocx(typeof o.solution==='string'?o.solution.replace(/\\n/g,'\n'):o.solution)); ch.push(new Paragraph({text:"© 2026 TONY STUDIO.",alignment:AlignmentType.CENTER,spacing:{before:800},children:[new TextRun({size:16,italics:true,color:"888888",font:"微軟正黑體"})]}));
+            ch.push(new Paragraph({text:"",spacing:{after:200}})); ch.push(new Paragraph({text:"解方與建議:",heading:HeadingLevel.HEADING_2,spacing:{before:400,after:200}})); ch.push(...parseMarkdownToDocx(typeof o.solution==='string'?o.solution.replace(/\\n/g,'\n'):o.solution)); 
+            
+            // 匯出 Word 報表的版權宣告統一調整
+            ch.push(new Paragraph({text:"@2020 TonyStudio (TONY 楊文澤顧問).",alignment:AlignmentType.CENTER,spacing:{before:800},children:[new TextRun({size:16,italics:true,color:"888888",font:"微軟正黑體"})]}));
+            
             const d = new Document({styles:{default:{document:{run:{font:"微軟正黑體",size:24}}}},sections:[{properties:{page:{margin:{top:convertInchesToTwip(1),right:convertInchesToTwip(1),bottom:convertInchesToTwip(1),left:convertInchesToTwip(1)}}},children:ch}]});
             Packer.toBlob(d).then(b => saveAs(b, `主角模式_${new Date().toISOString().slice(0,10)}.docx`));
         }
